@@ -39,7 +39,12 @@ import {
   mockDashboards,
   setupMocks,
 } from 'src/pages/DashboardList/DashboardList.testHelpers';
+import { useIsMobile } from 'src/hooks/useIsMobile';
 import { DASHBOARD_WORKSPACE_LIST_COLUMNS } from './constants';
+
+const mockUseIsMobileHook = useIsMobile as jest.MockedFunction<
+  typeof useIsMobile
+>;
 
 jest.setTimeout(30000);
 
@@ -57,6 +62,11 @@ jest.mock('src/dashboard/containers/DashboardPage', () => ({
 jest.mock('src/pages/DashboardList', () => ({
   __esModule: true,
   default: () => <div data-test="mock-classic-dashboard-list">Classic list</div>,
+}));
+
+jest.mock('src/hooks/useIsMobile', () => ({
+  ...jest.requireActual('src/hooks/useIsMobile'),
+  useIsMobile: jest.fn(() => false),
 }));
 
 const mockUseDashboard = jest.fn();
@@ -131,6 +141,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  mockUseIsMobileHook.mockReturnValue(false);
   mockUseDashboard.mockImplementation((idOrSlug: string | number) => ({
     result: {
       id: Number(idOrSlug) || 1,
@@ -200,6 +211,15 @@ test('browser back restores the previous preview selection', async () => {
       'Dashboard 1',
     );
   });
+});
+
+test('mobile layout hides the preview pane', async () => {
+  mockUseIsMobileHook.mockReturnValue(true);
+  renderWorkspace();
+  await screen.findByText('Sales Dashboard');
+  expect(
+    screen.queryByTestId('dashboard-workspace-preview'),
+  ).not.toBeInTheDocument();
 });
 
 test('?view=table renders the classic dashboard list (rollback)', async () => {

@@ -18,12 +18,13 @@
  */
 import { t } from '@apache-superset/core/translation';
 import { styled } from '@apache-superset/core/theme';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StringParam, useQueryParam } from 'use-query-params';
 import { debounce } from 'lodash-es';
 import { Input, Loading } from '@superset-ui/core/components';
 import { ListViewFilterOperator } from 'src/components';
 import { useListViewResource, useFavoriteStatus } from 'src/views/CRUD/hooks';
+import { useIsMobile } from 'src/hooks/useIsMobile';
 import withToasts from 'src/components/MessageToasts/withToasts';
 import DashboardCard from 'src/features/dashboards/DashboardCard';
 import type { UserWithPermissionsAndRoles } from 'src/types/bootstrapTypes';
@@ -47,11 +48,12 @@ const Shell = styled.div`
   min-width: 0;
 `;
 
-const Sidebar = styled.aside`
-  width: 360px;
-  max-width: 40%;
+const Sidebar = styled.aside<{ $mobile?: boolean }>`
+  width: ${({ $mobile }) => ($mobile ? '100%' : '360px')};
+  max-width: ${({ $mobile }) => ($mobile ? '100%' : '40%')};
   flex-shrink: 0;
-  border-right: 1px solid ${({ theme }) => theme.colorBorderSecondary};
+  border-right: ${({ theme, $mobile }) =>
+    $mobile ? 'none' : `1px solid ${theme.colorBorderSecondary}`};
   overflow-y: auto;
   padding: ${({ theme }) => theme.sizeUnit * 3}px;
   display: flex;
@@ -106,9 +108,14 @@ function resolvePaneId(
   return undefined;
 }
 
+type SearchField = 'dashboard_title' | 'slug';
+
 function DashboardWorkspace({ addDangerToast, user }: DashboardWorkspaceProps) {
+  const isMobile = useIsMobile();
   const [queryId, setQueryId] = useQueryParam('id', StringParam);
   const [searchText, setSearchText] = useState('');
+  const activeSearchTerm = useRef('');
+  const slugRetryForTerm = useRef<string | null>(null);
 
   const {
     state: { loading, resourceCollection: dashboards, resourceCount },
@@ -126,11 +133,12 @@ function DashboardWorkspace({ addDangerToast, user }: DashboardWorkspaceProps) {
   );
 
   const fetchDashboards = useCallback(
-    (search: string) => {
+    (search: string, field: SearchField) => {
+      activeSearchTerm.current = search.trim();
       const filters = search.trim()
         ? [
             {
-              id: 'dashboard_title',
+              id: field,
               operator: ListViewFilterOperator.Contains,
               value: search.trim(),
             },
@@ -146,38 +154,47 @@ function DashboardWorkspace({ addDangerToast, user }: DashboardWorkspaceProps) {
     [fetchData],
   );
 
-  const debouncedFetch = useMemo(
-    () => debounce((value: string) => fetchDashboards(value), 300),
+  const debouncedTitleSearch = useMemo(
+    () =>
+      debounce((value: string) => {
+        slugRetryForTerm.current = null;
+        fetchDashboards(value, 'dashboard_title');
+      }, 300),
     [fetchDashboards],
   );
 
   useEffect(() => {
     if (!searchText.trim()) {
-      fetchDashboards('');
+      slugRetryForTerm.current = null;
+      activeSearchTerm.current = '';
+      fetchDashboards('', 'dashboard_title');
       return undefined;
     }
-    debouncedFetch(searchText);
+    debouncedTitleSearch(searchText);
     return () => {
-      debouncedFetch.cancel();
+      debouncedTitleSearch.cancel();
     };
-  }, [searchText, fetchDashboards, debouncedFetch]);
+  }, [searchText, fetchDashboards, debouncedTitleSearch]);
 
-  const filteredDashboards = useMemo(() => {
-    const needle = searchText.trim().toLowerCase();
-    if (!needle) {
-      return dashboards;
+  useEffect(() => {
+    const term = searchText.trim();
+    if (!term || loading) {
+      return;
     }
-    return dashboards.filter(d => {
-      const title = d.dashboard_title?.toLowerCase() ?? '';
-      const slug = d.slug?.toLowerCase() ?? '';
-      return title.includes(needle) || slug.includes(needle);
-    });
-  }, [dashboards, searchText]);
+    if (activeSearchTerm.current !== term) {
+      return;
+    }
+    if (dashboards.length > 0) {
+      return;
+    }
+    if (slugRetryForTerm.current === term) {
+      return;
+    }
+    slugRetryForTerm.current = term;
+    fetchDashboards(term, 'slug');
+  }, [loading, dashboards.length, searchText, fetchDashboards]);
 
-  const dashboardIds = useMemo(
-    () => filteredDashboards.map(d => d.id),
-    [filteredDashboards],
-  );
+  const dashboardIds = useMemo(() => dashboards.map(d => d.id), [dashboards]);
   const [saveFavoriteStatus, favoriteStatus] = useFavoriteStatus(
     'dashboard',
     dashboardIds,
@@ -185,12 +202,12 @@ function DashboardWorkspace({ addDangerToast, user }: DashboardWorkspaceProps) {
   );
 
   const activeIdOrSlug = useMemo(
-    () => resolvePaneId(dashboards, queryId),
-    [dashboards, queryId],
+    () => (isMobile ? undefined : resolvePaneId(dashboards, queryId)),
+    [dashboards, queryId, isMobile],
   );
 
   useEffect(() => {
-    if (loading) {
+    if (isMobile || loading) {
       return;
     }
     if (queryId?.trim()) {
@@ -200,7 +217,7 @@ function DashboardWorkspace({ addDangerToast, user }: DashboardWorkspaceProps) {
     if (defaultId) {
       setQueryId(defaultId, 'replaceIn');
     }
-  }, [loading, dashboards, queryId, setQueryId]);
+  }, [isMobile, loading, dashboards, queryId, setQueryId]);
 
   const onSelectDashboard = useCallback(
     (dashboard: WorkspaceDashboard) => {
@@ -208,9 +225,6 @@ function DashboardWorkspace({ addDangerToast, user }: DashboardWorkspaceProps) {
     },
     [setQueryId],
   );
-
-  const noopExport = useCallback(() => {}, []);
-  const noopDelete = useCallback(() => {}, []);
 
   const listTruncated =
     !searchText.trim() &&
@@ -221,10 +235,13 @@ function DashboardWorkspace({ addDangerToast, user }: DashboardWorkspaceProps) {
     <>
       <SubMenu name={t('Dashboards')} />
       <Shell data-test="dashboard-workspace">
-        <Sidebar data-test="dashboard-workspace-sidebar">
+        <Sidebar
+          data-test="dashboard-workspace-sidebar"
+          $mobile={isMobile}
+        >
           <Input
             allowClear
-            placeholder={t('Search dashboards')}
+            placeholder={t('Search by title or slug')}
             value={searchText}
             onChange={e => setSearchText(e.target.value)}
             data-test="dashboard-workspace-search"
@@ -232,18 +249,18 @@ function DashboardWorkspace({ addDangerToast, user }: DashboardWorkspaceProps) {
           {listTruncated && (
             <div data-test="dashboard-workspace-truncation-hint">
               {t(
-                'Showing the first %(count)s dashboards. Search by title to find others.',
+                'Showing the first %(count)s dashboards. Search by title or slug to find others.',
                 { count: dashboards.length },
               )}
             </div>
           )}
           {loading ? (
             <Loading />
-          ) : filteredDashboards.length === 0 ? (
+          ) : dashboards.length === 0 ? (
             <div>{t('No dashboards found')}</div>
           ) : (
             <CardGrid>
-              {filteredDashboards.map(dashboard => {
+              {dashboards.map(dashboard => {
                 const idOrSlug = dashboardIdOrSlug(dashboard);
                 return (
                   <DashboardCard
@@ -256,10 +273,8 @@ function DashboardWorkspace({ addDangerToast, user }: DashboardWorkspaceProps) {
                     favoriteStatus={favoriteStatus[dashboard.id]}
                     user={user}
                     showThumbnails
-                    handleBulkDashboardExport={noopExport}
-                    onDelete={noopDelete}
-                    onSelect={onSelectDashboard}
-                    isActive={activeIdOrSlug === idOrSlug}
+                    onSelect={isMobile ? undefined : onSelectDashboard}
+                    isActive={!isMobile && activeIdOrSlug === idOrSlug}
                     workspaceMode
                   />
                 );
@@ -267,13 +282,15 @@ function DashboardWorkspace({ addDangerToast, user }: DashboardWorkspaceProps) {
             </CardGrid>
           )}
         </Sidebar>
-        <Preview data-test="dashboard-workspace-preview">
-          {activeIdOrSlug ? (
-            <DashboardWorkspacePane idOrSlug={activeIdOrSlug} />
-          ) : (
-            <Loading />
-          )}
-        </Preview>
+        {!isMobile && (
+          <Preview data-test="dashboard-workspace-preview">
+            {activeIdOrSlug ? (
+              <DashboardWorkspacePane idOrSlug={activeIdOrSlug} />
+            ) : (
+              <Loading />
+            )}
+          </Preview>
+        )}
       </Shell>
     </>
   );

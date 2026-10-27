@@ -65,8 +65,8 @@ interface DashboardCardProps {
   favoriteStatus: boolean;
   user?: UserWithPermissionsAndRoles;
   showThumbnails?: boolean;
-  handleBulkDashboardExport: (dashboardsToExport: Dashboard[]) => void;
-  onDelete: (dashboard: Dashboard) => void;
+  handleBulkDashboardExport?: (dashboardsToExport: Dashboard[]) => void;
+  onDelete?: (dashboard: Dashboard) => void;
   /** When set, card click selects in-place instead of navigating to dashboard.url */
   onSelect?: (dashboard: Dashboard) => void;
   isActive?: boolean;
@@ -143,7 +143,7 @@ function DashboardCard({
     });
   }
 
-  if (canExport && !workspaceMode) {
+  if (canExport && !workspaceMode && handleBulkDashboardExport) {
     menuItems.push({
       key: 'export',
       label: (
@@ -159,7 +159,7 @@ function DashboardCard({
     });
   }
 
-  if (canDelete && !workspaceMode) {
+  if (canDelete && !workspaceMode && onDelete) {
     menuItems.push({
       key: 'delete',
       label: (

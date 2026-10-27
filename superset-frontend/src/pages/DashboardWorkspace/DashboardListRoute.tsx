@@ -16,10 +16,15 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+import { lazy, Suspense } from 'react';
 import { StringParam, useQueryParam } from 'use-query-params';
-import DashboardList from 'src/pages/DashboardList';
+import { Loading } from '@superset-ui/core/components';
 import type { UserWithPermissionsAndRoles } from 'src/types/bootstrapTypes';
 import DashboardWorkspace from './index';
+
+const DashboardList = lazy(
+  () => import(/* webpackChunkName: "DashboardList" */ 'src/pages/DashboardList'),
+);
 
 type DashboardListRouteProps = {
   user?: UserWithPermissionsAndRoles;
@@ -29,12 +34,16 @@ type DashboardListRouteProps = {
 
 /**
  * `/dashboard/list/` is the Flask-backed entry. Default = split-view workspace;
- * `?view=table` keeps the classic list for rollback.
+ * `?view=table` keeps the classic list for rollback (lazy-loaded chunk).
  */
 export default function DashboardListRoute(props: DashboardListRouteProps) {
   const [view] = useQueryParam('view', StringParam);
   if (view === 'table') {
-    return <DashboardList {...props} />;
+    return (
+      <Suspense fallback={<Loading />}>
+        <DashboardList {...props} />
+      </Suspense>
+    );
   }
   return <DashboardWorkspace {...props} />;
 }
