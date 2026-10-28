@@ -2053,6 +2053,9 @@ DASHBOARD_AUTO_REFRESH_INTERVALS = [
 # Reduces response payload and query time for dashboards with many editors
 DASHBOARD_LIST_CUSTOM_TAGS_ONLY: bool = False
 
+# Split-view dashboard list at /dashboard/list/ (false => classic list UI).
+DASHBOARD_WORKSPACE_ENABLED: bool = True
+
 # This is used as a workaround for the alerts & reports scheduler task to get the time
 # celery beat triggered it, see https://github.com/celery/celery/issues/6974 for details
 CELERY_BEAT_SCHEDULER_EXPIRES = timedelta(weeks=1)

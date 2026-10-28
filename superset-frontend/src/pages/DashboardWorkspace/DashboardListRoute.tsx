@@ -25,6 +25,7 @@ import {
 import { StringParam, useQueryParam } from 'use-query-params';
 import { Loading } from '@superset-ui/core/components';
 import type { UserWithPermissionsAndRoles } from 'src/types/bootstrapTypes';
+import getBootstrapData from 'src/utils/getBootstrapData';
 import DashboardWorkspace from './index';
 
 type DashboardListRouteProps = {
@@ -39,13 +40,20 @@ const DashboardList: LazyExoticComponent<
   () => import(/* webpackChunkName: "DashboardList" */ 'src/pages/DashboardList'),
 );
 
+export function isDashboardWorkspaceEnabled(): boolean {
+  return (
+    getBootstrapData()?.common?.conf?.DASHBOARD_WORKSPACE_ENABLED !== false
+  );
+}
+
 /**
  * `/dashboard/list/` is the Flask-backed entry. Default = split-view workspace;
  * `?view=table` keeps the classic list for rollback (lazy-loaded chunk).
  */
 export default function DashboardListRoute(props: DashboardListRouteProps) {
   const [view] = useQueryParam('view', StringParam);
-  if (view === 'table') {
+  const useClassicList = view === 'table' || !isDashboardWorkspaceEnabled();
+  if (useClassicList) {
     return (
       <Suspense fallback={<Loading />}>
         <DashboardList {...props} />
