@@ -41,12 +41,13 @@ Thành phần của stack:
 |---|---|---|
 | **WSL2** | **Khuyên dùng trên Windows** | Repo nằm trong filesystem Linux của WSL2 (ví dụ `~/superset`), Docker Desktop bật WSL integration |
 | Linux native | Máy Linux | Docker Engine + Compose plugin |
-| Windows PowerShell | Khi không dùng được WSL2 | Chậm hơn do filesystem bridge: `uv pip install -e .` và `npm ci` chậm, file watch kém |
+| Windows PowerShell | Khi không dùng được WSL2 | Chậm hơn do filesystem bridge: `uv pip install -e .` và `npm ci` chậm; **backend không tự reload** — phải restart sau mỗi lần sửa Python (mục 9.2) |
 
 Stack dev bind-mount mã nguồn vào container (`./superset`, `./superset-frontend`,
 `./docker`...). Khi repo nằm trên filesystem Windows, Docker Desktop phải đọc file
-qua filesystem bridge nên mọi thao tác I/O trong container đều chậm, và webpack
-có thể không rebuild khi sửa file.
+qua filesystem bridge (mount kiểu `9p`) nên mọi thao tác I/O trong container đều
+chậm, và sự kiện inotify không tới được container. Webpack vẫn rebuild vì dùng
+polling.
 
 ---
 
@@ -425,15 +426,15 @@ docker compose build superset              # build lại image
 
 ### 9.1. Vòng đời phát triển
 
+Chi tiết từng loại thay đổi xem mục 9.2 (backend) và 9.3 (frontend).
+
 - **Backend (Python):** code được bind-mount từ host, container `superset` chạy
-  `flask run --reload`. Sửa file Python sẽ **tự reload**, **không cần** restart.
-  Restart còn chậm hơn: mỗi lần start, `docker-bootstrap.sh` chạy
-  `uv pip install -e .` (mất vài phút, xem 10.4).
+  `flask run --reload` (reloader `watchdog (inotify)`). Restart container chậm:
+  mỗi lần start, `docker-bootstrap.sh` chạy `uv pip install -e .` (vài phút, xem 10.4).
 - **Worker / beat:** `superset-worker` và `superset-worker-beat` không reinstall
-  app khi start (chỉ cài `superset-core`). Celery không tự reload — sửa code
-  task thì `docker compose restart superset-worker`.
-- **Frontend (TypeScript):** webpack dev server hot-reload tại
-  http://localhost:9000. Không cần restart.
+  app khi start (chỉ cài `superset-core`) nên restart nhanh. Celery không tự reload.
+- **Frontend (TypeScript):** webpack dev server theo dõi file bằng polling (2 giây)
+  và hot-reload tại http://localhost:9000.
 - **`node_modules`:** là volume ẩn danh của `superset-node` (`/app/superset-frontend/node_modules`),
   không thấy trên host. Muốn cài lại sạch: recreate container
   (`docker compose up -d --force-recreate --renew-anon-volumes superset-node`)
@@ -450,6 +451,87 @@ docker compose build superset              # build lại image
   (`superset mcp run`, cổng `MCP_PORT`, mặc định `5008`), nhưng
   `docker-compose.yml` không có service nào chạy chế độ này và không publish
   cổng `5008` ra host.
+
+### 9.2. Mỗi lần sửa code backend (Python)
+
+> **Khác biệt quan trọng giữa hai luồng:** reloader của Flask dựa vào sự kiện
+> inotify.
+>
+> - **WSL2 / Linux** (repo trong filesystem Linux): sửa file `.py` là Flask **tự
+>   reload** trong vài giây, không cần làm gì thêm.
+> - **Windows PowerShell** (repo trên filesystem Windows): bind mount là kiểu
+>   `9p` (drvfs), sự kiện inotify **không tới được** container — đã kiểm chứng:
+>   sửa file `.py` từ host hay từ trong container đều **không** reload. Phải
+>   restart thủ công (bảng dưới), mỗi lần mất vài phút tới ~10 phút. Nếu sửa
+>   backend thường xuyên, hãy chuyển sang WSL2 (mục 1).
+
+| Bạn vừa sửa | WSL2 / Linux | Windows PowerShell |
+|---|---|---|
+| File `.py` trong `superset/`, `superset-core/` (view, API, command, DAO...) | Không cần làm gì — đợi log `Detected change ... reloading`, rồi gọi lại API / F5 trình duyệt | `docker compose restart superset`, chờ `/health` trả `OK` |
+| Config: `docker/pythonpath_dev/superset_config.py`, `superset/config.py` | Như trên | Như trên |
+| Code chạy trong Celery (task, alert/report, thumbnail, cache warmup) | `docker compose restart superset-worker` | `docker compose restart superset-worker` |
+| Lịch Celery beat (`beat_schedule` trong config) | `docker compose restart superset-worker-beat` | `docker compose restart superset-worker-beat` |
+| Model SQLAlchemy (thêm/sửa cột, bảng) | Tạo migration rồi upgrade (lệnh dưới) | Tạo migration rồi upgrade, sau đó restart `superset` |
+| Thêm view / API mới cần permission | `docker compose exec superset superset init` | Như bên trái, sau đó restart `superset` |
+| Dependency Python (`pyproject.toml`, `requirements/*.txt`) | `docker compose up -d --build` | `docker compose up -d --build` |
+| Biến trong `docker/.env`, `docker/.env-local` | `docker compose up -d` (mục 4.2) | `docker compose up -d` |
+
+Tạo và chạy migration khi đổi model:
+
+```bash
+docker compose exec superset superset db migrate -m "mo_ta_thay_doi"
+docker compose exec superset superset db upgrade
+```
+
+File migration sinh ra trong `superset/migrations/versions/` — đổi tên theo quy
+ước `YYYY-MM-DD_HH-MM_<hash>_<mo_ta>.py` và review nội dung trước khi commit.
+
+Thử nhanh một package Python mà không build lại image: ghi vào
+`docker/requirements-local.txt` (đã gitignore) rồi restart service cần dùng —
+`docker-bootstrap.sh` cài file này mỗi lần start.
+
+Chạy test backend trong container:
+
+```bash
+docker compose exec superset pytest tests/unit_tests/<duong_dan_test>.py
+```
+
+### 9.3. Mỗi lần sửa code frontend (TypeScript / React)
+
+Webpack theo dõi file bằng **polling** (`poll: 2000` trong
+`superset-frontend/webpack.config.js`) nên hoạt động ở **cả hai luồng** —
+đã kiểm chứng trên repo nằm trên filesystem Windows.
+
+| Bạn vừa sửa | Cần làm |
+|---|---|
+| File `.ts`, `.tsx`, `.js`, `.less`, `.css` trong `superset-frontend/src/`, `packages/`, `plugins/` | Không cần restart. Đợi webpack compile xong (`docker compose logs -f superset-node`), trang ở http://localhost:9000 tự cập nhật qua HMR. Nếu không thấy thay đổi, **F5** — dev server cấu hình `hot: 'only'`, không tự reload cả trang khi HMR thất bại |
+| `package.json` / `package-lock.json` (thêm/đổi dependency, hoặc sau `git pull`) | `docker compose restart superset-node` — `docker-frontend.sh` chạy lại `npm ci` khi start (vài phút) |
+| `superset-frontend/webpack.config.js` hoặc file cấu hình build khác | `docker compose restart superset-node` |
+| Muốn cài lại `node_modules` từ đầu | `docker compose up -d --force-recreate --renew-anon-volumes superset-node` |
+
+Mở app qua http://localhost:9000 (hoặc http://localhost:80 qua nginx) khi phát
+triển frontend. Truy cập thẳng http://localhost:8088 vẫn nhận bundle mới
+(dev server ghi ra `superset/static/assets`) nhưng không có HMR — phải F5.
+
+Kiểm tra trước khi commit (chạy trong container `superset-node`):
+
+```bash
+docker compose exec superset-node npm run lint
+docker compose exec superset-node npm run type
+docker compose exec superset-node npm run test -- <ten_file>.test.tsx
+```
+
+### 9.4. Sau khi `git pull` / đổi nhánh
+
+```bash
+docker compose exec superset superset db upgrade   # nếu có migration mới
+docker compose exec superset superset init         # nếu có permission mới
+docker compose restart superset-node               # nếu package-lock.json thay đổi
+docker compose restart superset-worker             # nếu code Celery thay đổi
+```
+
+Trên Windows PowerShell thêm `docker compose restart superset` (backend không tự
+reload). Nếu `pyproject.toml` / `requirements/` thay đổi: `docker compose up -d --build`.
 
 ---
 
