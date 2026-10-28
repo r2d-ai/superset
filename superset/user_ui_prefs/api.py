@@ -17,13 +17,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from functools import wraps
+from typing import Any, Callable
 
 from flask import g, jsonify, request, Response
-from flask_appbuilder.api import expose, protect, safe
+from flask_appbuilder.api import expose, safe
 from marshmallow import ValidationError
 
-from superset.constants import MODEL_API_RW_METHOD_PERMISSION_MAP
 from superset.daos.user_ui_prefs import UserUiPrefDAO
 from superset.extensions import event_logger
 from superset.user_ui_prefs.schemas import UserUiPrefPutSchema
@@ -34,12 +34,32 @@ from superset.views.base_api import BaseSupersetApi, requires_json, statsd_metri
 logger = logging.getLogger(__name__)
 
 
+def require_authenticated(f: Callable[..., Response]) -> Callable[..., Response]:
+    """
+    Require a logged-in user and return 401 JSON when there is none.
+
+    This API is self-scoped: every query and write is keyed on ``g.user.id``,
+    so access must not depend on a FAB role permission (``can_read`` /
+    ``can_write`` on the view). Those permissions are only attached to roles by
+    ``superset init``, and only for the roles listed there -- which made a
+    freshly deployed instance answer 403 for every account. Authentication is
+    the only requirement here; authorization is "your own row, nothing else".
+    """
+
+    @wraps(f)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Response:
+        user = g.user if hasattr(g, "user") else None
+        if not user or getattr(user, "is_anonymous", True):
+            return self.response_401()
+        return f(self, *args, **kwargs)
+
+    return wrapper
+
+
 class UserUiPrefsRestApi(BaseSupersetApi):
     """REST API for per-user UI preferences (scoped to the authenticated user)."""
 
     allow_browser_login = True
-    class_permission_name = "UserUiPrefsRestApi"
-    method_permission_name = MODEL_API_RW_METHOD_PERMISSION_MAP
     resource_name = "user_ui_prefs"
     openapi_spec_tag = "User UI Preferences"
     put_schema = UserUiPrefPutSchema()
@@ -63,7 +83,7 @@ class UserUiPrefsRestApi(BaseSupersetApi):
         return None
 
     @expose("/<key>", methods=("GET",))
-    @protect()
+    @require_authenticated
     @safe
     @statsd_metrics
     @event_logger.log_this_with_context(
@@ -81,7 +101,7 @@ class UserUiPrefsRestApi(BaseSupersetApi):
         return self.response(200, key=key, value=row.value if row else None)
 
     @expose("/<key>", methods=("PUT",))
-    @protect()
+    @require_authenticated
     @safe
     @requires_json
     @statsd_metrics
