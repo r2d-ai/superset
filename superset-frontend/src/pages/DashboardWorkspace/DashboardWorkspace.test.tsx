@@ -81,7 +81,7 @@ const DashboardWorkspace = DashboardWorkspaceComponent as unknown as React.FC<
   Record<string, unknown>
 >;
 
-const mockUser = mockAdminUser as UserWithPermissionsAndRoles;
+const mockUser = mockAdminUser as unknown as UserWithPermissionsAndRoles;
 
 const listPath: string = RoutePaths.DASHBOARD_LIST;
 
