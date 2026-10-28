@@ -146,3 +146,4 @@ oxc-custom-build/
 *.code-workspace
 *.duckdb
 .opencode/
+.superpowers/
