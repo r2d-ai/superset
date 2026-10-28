@@ -57,7 +57,7 @@ có thể không rebuild khi sửa file.
 | Docker Engine / Docker Desktop | bản mới | Bắt buộc |
 | Docker Compose plugin | **>= 2.24.0** | Bắt buộc — xem ghi chú bên dưới |
 | Git | bất kỳ | Bắt buộc |
-| Python | 3.11+ | Chỉ cần khi chạy không Docker (mục 7) |
+| Python | 3.11+ | Chỉ cần khi chạy không Docker (mục 7); `make venv` chỉ nhận `python3.11` / `python3.12` |
 | Node.js / npm | `^24.16.0` / `^11.13.0` | Chỉ cần khi chạy không Docker (mục 7) |
 
 > **Vì sao cần Compose >= 2.24.0:** `docker-compose.yml` khai báo `env_file` theo
@@ -102,9 +102,10 @@ cd superset
 ```
 
 > **Chỉ chạy stack từ một nơi.** Nếu có một bản clone trong WSL và một bản trên
-> Windows, `docker compose` ở hai nơi là hai project Compose khác nhau nhưng
-> dùng chung tên container (cùng `COMPOSE_PROJECT_NAME=superset`), nên sẽ xung
-> đột. Không chạy song song từ WSL và PowerShell.
+> Windows với cùng `COMPOSE_PROJECT_NAME=superset`, cả hai là **cùng một** project
+> Compose (dùng chung container và volume). `docker compose up -d` từ bản clone
+> kia sẽ recreate container với bind mount trỏ sang cây mã nguồn của bản đó.
+> Không chạy luân phiên/song song từ WSL và PowerShell.
 
 ---
 
@@ -141,13 +142,18 @@ Biến build tùy chọn (cũng đặt trong `.env` gốc nếu cần):
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
 | `SUPERSET_BUILD_TARGET` | `dev` | Target build image: `dev` (live-reload), `lean` (tối giản), `superset` (đầy đủ) |
-| `INCLUDE_CHROMIUM` | `false` | Cài Chromium vào image (cần cho screenshot/report) |
+| `INCLUDE_CHROMIUM` | `false` | `true` cài Playwright + Chromium headless vào image (cho Alerts & Reports, thumbnail); target `superset` đã có sẵn |
 | `BUILD_TRANSLATIONS` | `false` | Build bản dịch khi build image |
 | `SUPERSET_FORCE_LOAD_EXAMPLES` | (rỗng) | Đặt `yes` để `superset-init` nạp lại examples dù đã có |
 
+`SUPERSET_BUILD_TARGET`, `INCLUDE_CHROMIUM`, `BUILD_TRANSLATIONS` là build arg —
+`docker compose up -d` không build lại image đã có. Đổi biến build cần build lại:
+`docker compose up -d --build`.
+
 ### 4.2. `docker/.env-local` — override cho container
 
-File này nằm trong `env_file` của các service, nên mọi biến trong đó được đưa
+File này nằm trong `env_file` của hầu hết service (trừ `redis`,
+`superset-websocket`), nên mọi biến trong đó được đưa
 vào container và ghi đè `docker/.env`. Chỉ đặt biến **an toàn trong container**:
 
 | Biến | Ý nghĩa |
@@ -175,7 +181,7 @@ echo "SUPERSET_SECRET_KEY=$(openssl rand -base64 42)" >> docker/.env-local
 ```
 
 ```powershell
-# cần openssl trong PATH (ví dụ đi kèm Git for Windows)
+# cần openssl trong PATH (ví dụ chạy trong Git Bash, hoặc thêm `…\Git\usr\bin` vào PATH)
 "SUPERSET_SECRET_KEY=" + (openssl rand -base64 42) | Add-Content docker/.env-local
 ```
 
@@ -199,6 +205,9 @@ Cổng mặc định: `80` (nginx), `8088` (superset), `9000` (webpack dev serve
 ```bash
 for p in 80 8088 9000 8080 5432 6379; do ss -ltn "sport = :$p" | grep -q LISTEN && echo "$p IN USE" || echo "$p FREE"; done
 ```
+
+Trên WSL2, `ss` không thấy cổng do tiến trình Windows chiếm — chạy thêm khối
+PowerShell bên dưới trên Windows.
 
 ```powershell
 foreach ($p in @(80,8088,9000,8080,5432,6379)) {
@@ -283,7 +292,7 @@ docker compose up -d
 
 Dùng `up -d`, không dùng `start`. `superset-node` và `superset-websocket` không
 khai báo `restart` policy nên không tự lên lại sau khi Docker/WSL tắt; các service
-còn lại có `restart: unless-stopped`.
+chạy lâu dài còn lại (trừ `superset-init` chạy một lần) có `restart: unless-stopped`.
 
 ---
 
@@ -433,8 +442,10 @@ docker compose build superset              # build lại image
   `/app/local_extensions` trong các container Superset.
 - **Migration:** khi thay đổi model, chạy
   `docker compose exec superset superset db upgrade`.
-- **Đổi env trong `docker/.env`, `docker/.env-local` hoặc `.env` gốc:**
-  `restart` không nạp lại env — phải `docker compose up -d` để recreate container.
+- **Đổi env trong `docker/.env`, `docker/.env-local` hoặc biến cổng trong `.env`
+  gốc:** `restart` không nạp lại env — phải `docker compose up -d` để recreate
+  container. Riêng biến build (`SUPERSET_BUILD_TARGET`, `INCLUDE_CHROMIUM`,
+  `BUILD_TRANSLATIONS`) cần `docker compose up -d --build` (mục 4.1).
 - **Chế độ `mcp`:** `docker-bootstrap.sh` hỗ trợ tham số `mcp`
   (`superset mcp run`, cổng `MCP_PORT`, mặc định `5008`), nhưng
   `docker-compose.yml` không có service nào chạy chế độ này và không publish
@@ -519,15 +530,16 @@ Xóa cache và build lại:
 docker compose build --no-cache superset
 ```
 
-### 10.7. WSL2 / Linux: webpack không rebuild khi sửa file
+### 10.7. WSL2 / Linux: lỗi `ENOSPC` hoặc webpack không rebuild khi sửa file
 
-Thường do hết inotify watcher. Kiểm tra:
+Áp dụng khi gặp `ENOSPC: System limit for number of file watchers reached` hoặc
+file watch không hoạt động — thường do hết inotify watcher. Kiểm tra:
 
 ```bash
 sysctl fs.inotify.max_user_watches
 ```
 
-Tăng lên `524288`:
+Tăng lên `524288` trên máy/distro chạy lệnh:
 
 ```bash
 echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf
