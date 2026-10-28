@@ -138,13 +138,22 @@ test('saveSidebarPrefs PUTs to API and updates cache on success', async () => {
   expect(readSidebarPrefsCache('1')).toEqual(prefs);
 });
 
-test('saveSidebarPrefs writes cache only when PUT fails', async () => {
+test('saveSidebarPrefs does not update cache when PUT fails', async () => {
+  writeSidebarPrefsCache('2', {
+    order: ['1'],
+    width: 360,
+    collapsed: false,
+  });
   (SupersetClient.put as jest.Mock).mockRejectedValue(new Error('offline'));
-  const prefs = { order: [], width: 500, collapsed: true };
+  const attempted = { order: [], width: 500, collapsed: true };
 
-  const ok = await saveSidebarPrefs('2', prefs);
+  const ok = await saveSidebarPrefs('2', attempted);
   expect(ok).toBe(false);
-  expect(readSidebarPrefsCache('2')).toEqual(prefs);
+  expect(readSidebarPrefsCache('2')).toEqual({
+    order: ['1'],
+    width: 360,
+    collapsed: false,
+  });
 });
 
 test('normalizeSidebarPrefs rejects invalid shapes safely', () => {

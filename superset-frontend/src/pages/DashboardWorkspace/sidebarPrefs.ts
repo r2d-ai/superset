@@ -127,7 +127,6 @@ export async function saveSidebarPrefs(
     writeSidebarPrefsCache(userKey, prefs);
     return true;
   } catch {
-    writeSidebarPrefsCache(userKey, prefs);
     return false;
   }
 }
