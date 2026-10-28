@@ -181,7 +181,7 @@ echo "SUPERSET_SECRET_KEY=$(openssl rand -base64 42)" >> docker/.env-local
 ```
 
 ```powershell
-# cần openssl trong PATH (ví dụ chạy trong Git Bash, hoặc thêm `…\Git\usr\bin` vào PATH)
+# cần openssl.exe trong PATH (ví dụ thêm thư mục usr\bin của Git for Windows vào PATH); trong Git Bash dùng lệnh bash ở trên
 "SUPERSET_SECRET_KEY=" + (openssl rand -base64 42) | Add-Content docker/.env-local
 ```
 
