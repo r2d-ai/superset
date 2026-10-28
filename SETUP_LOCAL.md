@@ -494,8 +494,9 @@ docker compose up -d
 ### 10.4. Container `superset` báo `unhealthy` lúc khởi động
 
 Container `superset` cài lại package ở chế độ editable (`uv pip install -e .`) mỗi
-lần start nên mất vài phút trước khi app sẵn sàng (lâu hơn khi repo nằm trên
-filesystem Windows). Healthcheck sẽ trở lại `healthy` sau đó.
+lần start nên mất vài phút trước khi app sẵn sàng (khi repo nằm trên filesystem
+Windows có thể tới ~10 phút). Healthcheck sẽ trở lại `healthy` sau đó; trong lúc
+chờ, `docker compose logs -f superset` sẽ dừng ở `Building apache-superset`.
 
 Cảnh báo `Failed to hardlink files` của uv trong log là **vô hại** (uv chuyển
 sang copy file).
