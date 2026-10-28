@@ -32,10 +32,12 @@ import { ReactRouter5Adapter } from 'use-query-params/adapters/react-router-5';
 import { SupersetApiError } from '@superset-ui/core';
 import { ResourceStatus } from 'src/hooks/apiResources/apiResources';
 import { RoutePaths } from 'src/views/routePaths';
+import type { UserWithPermissionsAndRoles } from 'src/types/bootstrapTypes';
 import DashboardWorkspaceComponent from 'src/pages/DashboardWorkspace';
 import DashboardListRoute from 'src/pages/DashboardWorkspace/DashboardListRoute';
 import {
   getLatestDashboardApiCall,
+  mockAdminUser,
   mockDashboards,
   setupMocks,
 } from 'src/pages/DashboardList/DashboardList.testHelpers';
@@ -79,23 +81,15 @@ const DashboardWorkspace = DashboardWorkspaceComponent as unknown as React.FC<
   Record<string, unknown>
 >;
 
-const mockUser = {
-  userId: 1,
-  firstName: 'Test',
-  lastName: 'User',
-  roles: {
-    Admin: [
-      ['can_write', 'Dashboard'],
-      ['can_export', 'Dashboard'],
-    ],
-  },
-};
+const mockUser = mockAdminUser as UserWithPermissionsAndRoles;
 
-const listPath = RoutePaths.DASHBOARD_LIST;
+const listPath: string = RoutePaths.DASHBOARD_LIST;
 
 function renderWorkspace(
-  initialPath = listPath,
-  history = createMemoryHistory({ initialEntries: [initialPath] }),
+  initialPath: string = listPath,
+  history = createMemoryHistory({
+    initialEntries: [initialPath] as [string, ...string[]],
+  }),
 ) {
   const store = configureStore({
     reducer: {
@@ -118,7 +112,7 @@ function renderWorkspace(
   };
 }
 
-function renderListRoute(initialPath = listPath) {
+function renderListRoute(initialPath: string = listPath) {
   const store = configureStore({
     reducer: {
       user: () => mockUser,
@@ -127,7 +121,7 @@ function renderListRoute(initialPath = listPath) {
   });
   return render(
     <Provider store={store}>
-      <MemoryRouter initialEntries={[initialPath]}>
+      <MemoryRouter initialEntries={[initialPath] as [string, ...string[]]}>
         <QueryParamProvider adapter={ReactRouter5Adapter}>
           <DashboardListRoute user={mockUser} />
         </QueryParamProvider>

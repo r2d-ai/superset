@@ -16,21 +16,28 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { lazy, Suspense } from 'react';
+import {
+  ComponentType,
+  lazy,
+  LazyExoticComponent,
+  Suspense,
+} from 'react';
 import { StringParam, useQueryParam } from 'use-query-params';
 import { Loading } from '@superset-ui/core/components';
 import type { UserWithPermissionsAndRoles } from 'src/types/bootstrapTypes';
 import DashboardWorkspace from './index';
-
-const DashboardList = lazy(
-  () => import(/* webpackChunkName: "DashboardList" */ 'src/pages/DashboardList'),
-);
 
 type DashboardListRouteProps = {
   user?: UserWithPermissionsAndRoles;
   addDangerToast?: (msg: string) => void;
   addSuccessToast?: (msg: string) => void;
 };
+
+const DashboardList: LazyExoticComponent<
+  ComponentType<DashboardListRouteProps>
+> = lazy(
+  () => import(/* webpackChunkName: "DashboardList" */ 'src/pages/DashboardList'),
+);
 
 /**
  * `/dashboard/list/` is the Flask-backed entry. Default = split-view workspace;
